@@ -4,6 +4,7 @@ from albert import (
     RankItem,
     StandardItem,
     Action,
+    Icon,
     setClipboardText,
     # debug,
     # info,
@@ -12,8 +13,8 @@ from albert import (
     # ClipAction,
 )
 
-md_iid = '2.0'
-md_version = '0.1'
+md_iid = '5.0'
+md_version = '0.2'
 md_name = 'Calculate Anything'
 md_description = 'A ULauncher/Albert extension that supports currency, units '
 'and date time conversion, as well as a calculator that supports complex '
@@ -96,8 +97,9 @@ def is_trigger(index):
     def _is_trigger(query):
         try:
             trigger = TRIGGERS[index] + ' '
-            if query.string.startswith(trigger):
-                return query.string[len(trigger) :]
+            # QueryContext uses .query instead of .string
+            if query.query.startswith(trigger):
+                return query.query[len(trigger):]
             return None
         except IndexError:
             return None
@@ -137,21 +139,19 @@ def initialize():
 class Plugin(PluginInstance, GlobalQueryHandler):
     def __init__(self):
         initialize()
-        GlobalQueryHandler.__init__(
-            self,
-            id=md_id,
-            name=md_name,
-            description=md_description,
-        )
-        PluginInstance.__init__(self, extensions=[self])
+        # v3.0+: constructors no longer accept id/name/description/extensions
+        PluginInstance.__init__(self)
+        GlobalQueryHandler.__init__(self)
 
-    def handleGlobalQuery(self, query):
-        calculator_query_nokw = is_calculator_trigger(query)
-        is_bin_trigger_nokw = is_bin_trigger(query)
-        is_time_trigger_nokw = is_time_trigger(query)
-        is_dec_trigger_nokw = is_dec_trigger(query)
-        is_hex_trigger_nokw = is_hex_trigger(query)
-        is_oct_trigger_nokw = is_oct_trigger(query)
+    def rankItems(self, context):
+        # v5.0: GlobalQueryHandler requires rankItems(QueryContext) -> List[RankItem]
+        # QueryContext exposes .query (was .string in older versions)
+        calculator_query_nokw = is_calculator_trigger(context)
+        is_bin_trigger_nokw = is_bin_trigger(context)
+        is_time_trigger_nokw = is_time_trigger(context)
+        is_dec_trigger_nokw = is_dec_trigger(context)
+        is_hex_trigger_nokw = is_hex_trigger(context)
+        is_oct_trigger_nokw = is_oct_trigger(context)
         mode = 'calculator'
         if not TRIGGERS:
             handlers = []
@@ -197,8 +197,8 @@ class Plugin(PluginInstance, GlobalQueryHandler):
         items = []
         results = MultiHandler().handle(query_str, *handlers)
         for i, result in enumerate(results):
-            icon = result.icon or images_dir('icon.svg')
-            icon = os.path.join(MAIN_DIR, icon)
+            icon_path = result.icon or images_dir('icon.svg')
+            icon_path = os.path.join(MAIN_DIR, icon_path)
 
             if result.clipboard is not None:
                 actions = [
@@ -215,7 +215,8 @@ class Plugin(PluginInstance, GlobalQueryHandler):
                 RankItem(
                     StandardItem(
                         id=md_name,
-                        iconUrls=[icon],
+                        # v4.0+: iconUrls removed; use icon_factory (callable -> Icon)
+                        icon_factory=lambda p=icon_path: Icon.image(p),
                         text=result.name,
                         subtext=result.description,
                         actions=actions,
@@ -229,12 +230,12 @@ class Plugin(PluginInstance, GlobalQueryHandler):
         ) or (len(items) == 0 and SHOW_EMPTY_PLACEHOLDER)
 
         if should_show_placeholder:
-            icon = os.path.join(MAIN_DIR, images_dir('icon.svg'))
+            icon_path = os.path.join(MAIN_DIR, images_dir('icon.svg'))
             items.append(
                 RankItem(
                     StandardItem(
                         id=md_name,
-                        iconUrls=[icon],
+                        icon_factory=lambda p=icon_path: Icon.image(p),
                         text=LanguageService().translate('no-result', 'misc'),
                         subtext=LanguageService().translate(
                             'no-result-{}-description'.format(mode), 'misc'
