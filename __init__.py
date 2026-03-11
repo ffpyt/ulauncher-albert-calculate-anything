@@ -1,6 +1,7 @@
+from abc import abstractmethod
 from albert import (
+    RankedQueryHandler,
     PluginInstance,
-    GlobalQueryHandler,
     RankItem,
     StandardItem,
     Action,
@@ -10,7 +11,6 @@ from albert import (
     # info,
     # warning,
     # critical,
-    # ClipAction,
 )
 
 md_iid = '5.0'
@@ -21,46 +21,22 @@ md_description = 'A ULauncher/Albert extension that supports currency, units '
 'numbers and functions.'
 md_license = 'MIT'
 md_url = 'https://github.com/tchar/ulauncher-albert-calculate-anything'
-md_authors = '@tchar'
+md_authors = ['@tchar']
 md_bin_dependencies = []
 
-################################### SETTINGS ####################################### noqa: E266, E501
-# Below are the settings for this extension
-# Currency provider: One of "internal", "fixerio")
-CURRENCY_PROVIDER = 'internal'
-# API Key is your fixer.io API key
-API_KEY = ''
-# Cache update interval in seconds (defaults to 1 day = 86400 seconds)
-CACHE = 86400
-# Default currencies to show when no target currency is provided
-DEFAULT_CURRENCIES = 'USD,EUR,GBP,CAD'
-# Default cities to show when converting timezones
-DEFAULT_CITIES = 'New York City US, London GB, Madrid ES, Vancouver CA, Athens GR'  # noqa: E501
-# Units conversion mode (normal or crazy)
-UNITS_CONVERSION_MODE = 'normal'
-# Set the following to True if you want to enable placeholder for empty results # noqa: E501
-SHOW_EMPTY_PLACEHOLDER = False
-# Below line is the trigger keywords to your choice (put a space after your keyword) # noqa: E501
-TRIGGERS = ['=', 'time', 'dec', 'bin', 'hex', 'oct']
-#################################################################################### noqa: E266, E501
-
-import os  # noqa: E402
-import sys  # noqa: E402
+import os
+import sys
+import locale
 
 try:
-    from calculate_anything.constants import MAIN_DIR  # noqa: E402
+    from calculate_anything.constants import MAIN_DIR
 except ImportError:
     MAIN_DIR = os.path.dirname(os.path.realpath(__file__))
     sys.path.append(MAIN_DIR)
 
-from calculate_anything import logging  # noqa: E402
-from calculate_anything.preferences import Preferences  # noqa: E402
-from calculate_anything.lang import LanguageService  # noqa: E402
-
-# from calculate_anything.time import TimezoneService  # noqa: E402
-# from calculate_anything.currency import CurrencyService  # noqa: E402
-from calculate_anything.query.handlers import MultiHandler  # noqa: E402
-from calculate_anything.query.handlers import (  # noqa: E402
+from calculate_anything.lang import LanguageService
+from calculate_anything.query.handlers import MultiHandler
+from calculate_anything.query.handlers import (
     UnitsQueryHandler,
     CalculatorQueryHandler,
     PercentagesQueryHandler,
@@ -70,136 +46,59 @@ from calculate_anything.query.handlers import (  # noqa: E402
     Base8QueryHandler,
     Base16QueryHandler,
 )
-
-from calculate_anything.utils import images_dir  # noqa: E402
-
-# Thanks albert for making me hack the shit out of logging
-# handler = logging.CustomHandler(debug, info, warning, critical, critical)
-# handler.setFormatter(
-#     logging.ColorFormatter(
-#         fmt='[{BLUE}{{name}}.{{funcName}}:{{lineno}}{RESET}]: {{message}}',
-#         use_color=True,
-#     )
-# )
-# logging.set_stdout_handler(handler)
-
-CURRENCY_PROVIDER = globals().get('CURRENCY_PROVIDER', '').lower()
-API_KEY = globals().get('API_KEY') or ''
-UNITS_CONVERSION_MODE = globals().get('UNITS_CONVERSION_MODE') or ''
-CACHE = globals().get('CACHE') or 86400
-TRIGGERS = globals().get('TRIGGERS') or []
-if isinstance(TRIGGERS, str):
-    TRIGGERS = [TRIGGERS]
-TRIGGERS = [trigger.strip() for trigger in TRIGGERS]
+from calculate_anything.utils import images_dir
 
 
-def is_trigger(index):
-    def _is_trigger(query):
-        try:
-            trigger = TRIGGERS[index] + ' '
-            # QueryContext uses .query instead of .string
-            if query.query.startswith(trigger):
-                return query.query[len(trigger):]
-            return None
-        except IndexError:
-            return None
+class _BaseCalculateQueryHandler(RankedQueryHandler):
+    """
+    Shared base for all Calculate Anything query handlers.
 
-    return _is_trigger
+    Subclasses must implement all abstractmethod / properties.
+    """
 
+    def __init__(self, show_empty_placeholder: bool):
+        RankedQueryHandler.__init__(
+            self,
+        )
+        self.show_empty_placeholder = show_empty_placeholder
 
-is_calculator_trigger = is_trigger(0)
-is_time_trigger = is_trigger(1)
-is_dec_trigger = is_trigger(2)
-is_bin_trigger = is_trigger(3)
-is_hex_trigger = is_trigger(4)
-is_oct_trigger = is_trigger(5)
+    @property
+    @abstractmethod
+    def mode(self) -> str:
+        """Used for calculate_anything LanguageService translation key."""
+        ...
 
+    @property
+    @abstractmethod
+    def ca_handlers(self) -> list:
+        """List of calculate_anything handler classes to be used in MultiHandler."""
+        ...
 
-def initialize():
-    if not TRIGGERS:
-        CalculatorQueryHandler.keyword = ''
-        UnitsQueryHandler.keyword = ''
-        PercentagesQueryHandler.keyword = ''
+    @property
+    @abstractmethod
+    def query_prefix(self) -> str:
+        """Prefix to be prepended to context.query to form the internal query string."""
+        ...
 
-    preferences = Preferences()
+    def id(self) -> str:
+        return f'{md_name}/{self.mode}'
 
-    preferences.language.set('en_US')
+    def name(self) -> str:
+        return f'{md_name} ({self.mode.capitalize()})'
 
-    api_key = API_KEY or os.environ.get('CALCULATE_ANYTHING_API_KEY') or ''
-    preferences.currency.add_provider(CURRENCY_PROVIDER, api_key)
-    preferences.currency.set_cache_update_frequency(CACHE)
-    preferences.currency.set_default_currencies(DEFAULT_CURRENCIES)
-
-    preferences.units.set_conversion_mode(UNITS_CONVERSION_MODE)
-
-    preferences.time.set_default_cities(DEFAULT_CITIES)
-    preferences.commit()
-
-
-class Plugin(PluginInstance, GlobalQueryHandler):
-    def __init__(self):
-        initialize()
-        # v3.0+: constructors no longer accept id/name/description/extensions
-        PluginInstance.__init__(self)
-        GlobalQueryHandler.__init__(self)
+    def description(self) -> str:
+        return f'{md_description} [{self.mode}]'
 
     def rankItems(self, context):
-        # v5.0: GlobalQueryHandler requires rankItems(QueryContext) -> List[RankItem]
-        # QueryContext exposes .query (was .string in older versions)
-        calculator_query_nokw = is_calculator_trigger(context)
-        is_bin_trigger_nokw = is_bin_trigger(context)
-        is_time_trigger_nokw = is_time_trigger(context)
-        is_dec_trigger_nokw = is_dec_trigger(context)
-        is_hex_trigger_nokw = is_hex_trigger(context)
-        is_oct_trigger_nokw = is_oct_trigger(context)
-        mode = 'calculator'
-        if not TRIGGERS:
-            handlers = []
-        elif is_time_trigger_nokw is not None:
-            query_nokw = is_time_trigger_nokw
-            query_str = TimeQueryHandler().keyword + query_nokw
-            handlers = [TimeQueryHandler]
-            mode = 'time'
-        elif is_dec_trigger_nokw is not None:
-            query_nokw = is_dec_trigger_nokw
-            query_str = Base10QueryHandler().keyword + query_nokw
-            handlers = [Base10QueryHandler]
-            mode = 'dec'
-        elif is_hex_trigger_nokw is not None:
-            query_nokw = is_hex_trigger_nokw
-            query_str = Base16QueryHandler().keyword + query_nokw
-            handlers = [Base16QueryHandler]
-            mode = 'hex'
-        elif is_oct_trigger_nokw is not None:
-            query_nokw = is_oct_trigger_nokw
-            query_str = Base8QueryHandler().keyword + query_nokw
-            handlers = [Base8QueryHandler]
-            mode = 'oct'
-        elif is_bin_trigger_nokw is not None:
-            query_nokw = is_bin_trigger_nokw
-            query_str = Base2QueryHandler().keyword + query_nokw
-            handlers = [Base2QueryHandler]
-            mode = 'bin'
-        elif calculator_query_nokw is not None:
-            query_nokw = calculator_query_nokw
-            query_str = CalculatorQueryHandler().keyword + ' ' + query_nokw
-            handlers = [
-                UnitsQueryHandler,
-                CalculatorQueryHandler,
-                PercentagesQueryHandler,
-            ]
-        else:
-            return []
-
-        if not handlers:
-            return []
+        query_str = self.query_prefix + context.query
 
         items = []
-        results = MultiHandler().handle(query_str, *handlers)
+        results = MultiHandler().handle(query_str, *self.ca_handlers)
         for i, result in enumerate(results):
             icon_path = result.icon or images_dir('icon.svg')
             icon_path = os.path.join(MAIN_DIR, icon_path)
 
+            actions = []
             if result.clipboard is not None:
                 actions = [
                     Action(
@@ -208,14 +107,11 @@ class Plugin(PluginInstance, GlobalQueryHandler):
                         lambda c=result.clipboard: setClipboardText(c),
                     )
                 ]
-            else:
-                actions = []
 
             items.append(
                 RankItem(
                     StandardItem(
                         id=md_name,
-                        # v4.0+: iconUrls removed; use icon_factory (callable -> Icon)
                         icon_factory=lambda p=icon_path: Icon.image(p),
                         text=result.name,
                         subtext=result.description,
@@ -226,8 +122,8 @@ class Plugin(PluginInstance, GlobalQueryHandler):
             )
 
         should_show_placeholder = (
-            query_nokw.strip() == '' and TRIGGERS and len(items) == 0
-        ) or (len(items) == 0 and SHOW_EMPTY_PLACEHOLDER)
+            context.query.strip() == '' or len(items) == 0
+        ) and self.show_empty_placeholder
 
         if should_show_placeholder:
             icon_path = os.path.join(MAIN_DIR, images_dir('icon.svg'))
@@ -238,10 +134,274 @@ class Plugin(PluginInstance, GlobalQueryHandler):
                         icon_factory=lambda p=icon_path: Icon.image(p),
                         text=LanguageService().translate('no-result', 'misc'),
                         subtext=LanguageService().translate(
-                            'no-result-{}-description'.format(mode), 'misc'
+                            'no-result-{}-description'.format(self.mode), 'misc'
                         ),
                     ),
                     len(items) - 1,
                 )
             )
+
         return items
+
+
+class _CalculatorHandler(_BaseCalculateQueryHandler):
+    def defaultTrigger(self): return '= '
+
+    @property
+    def mode(self): return 'calculator'
+
+    @property
+    def ca_handlers(self): return [UnitsQueryHandler, CalculatorQueryHandler, PercentagesQueryHandler]
+
+    @property
+    def query_prefix(self): return CalculatorQueryHandler().keyword + ' '
+
+
+class _TimeHandler(_BaseCalculateQueryHandler):
+    def defaultTrigger(self): return 'time '
+
+    @property
+    def mode(self): return 'time'
+
+    @property
+    def ca_handlers(self): return [TimeQueryHandler]
+
+    @property
+    def query_prefix(self): return TimeQueryHandler().keyword
+
+
+class _DecHandler(_BaseCalculateQueryHandler):
+    def defaultTrigger(self): return 'dec '
+
+    @property
+    def mode(self): return 'dec'
+
+    @property
+    def ca_handlers(self): return [Base10QueryHandler]
+
+    @property
+    def query_prefix(self): return Base10QueryHandler().keyword
+
+
+class _BinHandler(_BaseCalculateQueryHandler):
+    def defaultTrigger(self): return 'bin '
+
+    @property
+    def mode(self): return 'bin'
+
+    @property
+    def ca_handlers(self): return [Base2QueryHandler]
+
+    @property
+    def query_prefix(self): return Base2QueryHandler().keyword
+
+
+class _HexHandler(_BaseCalculateQueryHandler):
+    def defaultTrigger(self): return 'hex '
+
+    @property
+    def mode(self): return 'hex'
+
+    @property
+    def ca_handlers(self): return [Base16QueryHandler]
+
+    @property
+    def query_prefix(self): return Base16QueryHandler().keyword
+
+
+class _OctHandler(_BaseCalculateQueryHandler):
+    def defaultTrigger(self): return 'oct '
+
+    @property
+    def mode(self): return 'oct'
+
+    @property
+    def ca_handlers(self): return [Base8QueryHandler]
+
+    @property
+    def query_prefix(self): return Base8QueryHandler().keyword
+
+
+class Plugin(PluginInstance):
+
+    DEFAULT_SETTINGS = {
+        'currency_provider': 'internal',
+        'api_key': '',
+        'cache': 86400,
+        'default_currencies': 'USD,EUR,GBP,CAD',
+        'default_cities': 'New York City US, London GB, Madrid ES, Vancouver CA, Athens GR',
+        'units_conversion_mode': 'normal',
+        'show_empty_placeholder': False,
+        'language': ".".join(locale.getlocale()[:2]),
+    }
+
+    def __init__(self):
+        PluginInstance.__init__(self)
+
+        # initialize settings with defaults if they don't exist
+        for setting, default in self.DEFAULT_SETTINGS.items():
+            if self.readConfig(setting, type(default)) is None:
+                self.writeConfig(setting, default)
+
+        self._handlers = [
+            _CalculatorHandler(self.show_empty_placeholder),
+            _TimeHandler(self.show_empty_placeholder),
+            _DecHandler(self.show_empty_placeholder),
+            _BinHandler(self.show_empty_placeholder),
+            _HexHandler(self.show_empty_placeholder),
+            _OctHandler(self.show_empty_placeholder),
+        ]
+        self._apply_preferences()
+
+    # ------------------------------------------------------------------ config properties
+
+    @property
+    def currency_provider(self) -> str:
+        return self.readConfig('currency_provider', str)
+
+    @currency_provider.setter
+    def currency_provider(self, value: str):
+        self.writeConfig('currency_provider', value)
+        self._apply_preferences()
+
+    @property
+    def api_key(self) -> str:
+        return self.readConfig('api_key', str)
+
+    @api_key.setter
+    def api_key(self, value: str):
+        self.writeConfig('api_key', value)
+        self._apply_preferences()
+
+    @property
+    def cache(self) -> int:
+        return self.readConfig('cache', int)
+
+    @cache.setter
+    def cache(self, value: int):
+        self.writeConfig('cache', value)
+        self._apply_preferences()
+
+    @property
+    def default_currencies(self) -> str:
+        return self.readConfig('default_currencies', str)
+
+    @default_currencies.setter
+    def default_currencies(self, value: str):
+        self.writeConfig('default_currencies', value)
+        self._apply_preferences()
+
+    @property
+    def default_cities(self) -> str:
+        return self.readConfig('default_cities', str)
+
+    @default_cities.setter
+    def default_cities(self, value: str):
+        self.writeConfig('default_cities', value)
+        self._apply_preferences()
+
+    @property
+    def units_conversion_mode(self) -> str:
+        return self.readConfig('units_conversion_mode', str)
+
+    @units_conversion_mode.setter
+    def units_conversion_mode(self, value: str):
+        self.writeConfig('units_conversion_mode', value)
+        self._apply_preferences()
+
+    @property
+    def show_empty_placeholder(self) -> bool:
+        return self.readConfig('show_empty_placeholder', bool)
+
+    @show_empty_placeholder.setter
+    def show_empty_placeholder(self, value: bool):
+        self.writeConfig('show_empty_placeholder', value)
+        for handler in self._handlers:
+            handler.show_empty_placeholder = value
+
+    @property
+    def language(self) -> str:
+        return self.readConfig('language', str)
+
+    @language.setter
+    def language(self, value: str):
+        self.writeConfig('language', value)
+        self._apply_preferences()
+
+    # ------------------------------------------------------------------ albert config widget
+
+    def configWidget(self):
+        return [
+            {
+                'type': 'combobox',
+                'label': 'Currency provider',
+                'property': 'currency_provider',
+                'items': ['internal', 'fixerio'],
+            },
+            {
+                'type': 'lineedit',
+                'label': 'Fixer.io API key',
+                'property': 'api_key',
+                'widget_properties': {'placeholderText': 'Required for fixerio provider'},
+            },
+            {
+                'type': 'spinbox',
+                'label': 'Currency cache (seconds)',
+                'property': 'cache',
+                'widget_properties': {'minimum': 0, 'maximum': 604800},
+            },
+            {
+                'type': 'lineedit',
+                'label': 'Default currencies',
+                'property': 'default_currencies',
+                'widget_properties': {'placeholderText': 'e.g. USD,EUR,GBP,CAD'},
+            },
+            {
+                'type': 'lineedit',
+                'label': 'Default cities',
+                'property': 'default_cities',
+                'widget_properties': {'placeholderText': 'e.g. New York City US, London GB'},
+            },
+            {
+                'type': 'lineedit',
+                'label': 'Language',
+                'property': 'language',
+                'widget_properties': {'placeholderText': 'e.g. en_US.UTF-8, de_DE.UTF-8'},
+            },
+            {
+                'type': 'combobox',
+                'label': 'Units conversion mode',
+                'property': 'units_conversion_mode',
+                'items': ['normal', 'crazy'],
+            },
+            {
+                'type': 'checkbox',
+                'label': 'Show placeholder on empty results',
+                'property': 'show_empty_placeholder',
+            },
+        ]
+
+    # ------------------------------------------------------------------ internal
+
+    def _apply_preferences(self):
+        from calculate_anything.preferences import Preferences
+
+        api_key = self.api_key or os.environ.get('CALCULATE_ANYTHING_API_KEY') or ''
+
+        # Resolve language: configured value, then system locale, then fallback
+        lang = self.language
+        if not lang:
+            lang, _ = locale.getlocale()
+        lang = lang or self._DEFAULT_LANGUAGE
+
+        preferences = Preferences()
+        preferences.language.set(lang)
+        preferences.currency.add_provider(self.currency_provider, api_key)
+        preferences.currency.set_cache_update_frequency(self.cache)
+        preferences.currency.set_default_currencies(self.default_currencies)
+        preferences.units.set_conversion_mode(self.units_conversion_mode)
+        preferences.time.set_default_cities(self.default_cities)
+        preferences.commit()
+
+    def extensions(self):
+        return self._handlers
