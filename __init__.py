@@ -388,11 +388,15 @@ class Plugin(PluginInstance):
 
         api_key = self.api_key or os.environ.get('CALCULATE_ANYTHING_API_KEY') or ''
 
-        # Resolve language: configured value, then system locale, then fallback
-        lang = self.language
-        if not lang:
-            lang, _ = locale.getlocale()
-        lang = lang or self._DEFAULT_LANGUAGE
+        # Resolve language: configured value, then C.
+        lang = 'C'
+        for candidate in [self.language, 'C']:
+            try:
+                locale.setlocale(locale.LC_NUMERIC, candidate)
+                lang = candidate
+                break
+            except locale.Error:
+                continue
 
         preferences = Preferences()
         preferences.language.set(lang)
