@@ -232,7 +232,7 @@ class Plugin(PluginInstance):
         'default_cities': 'New York City US, London GB, Madrid ES, Vancouver CA, Athens GR',
         'units_conversion_mode': 'normal',
         'show_empty_placeholder': False,
-        'language': ".".join(locale.getlocale()[:2]),
+        'language': locale.getlocale()[0],
     }
 
     def __init__(self):
@@ -366,7 +366,7 @@ class Plugin(PluginInstance):
                 'type': 'lineedit',
                 'label': 'Language',
                 'property': 'language',
-                'widget_properties': {'placeholderText': 'e.g. en_US.UTF-8, de_DE.UTF-8'},
+                'widget_properties': {'placeholderText': 'e.g. en_US, de_DE'},
             },
             {
                 'type': 'combobox',
@@ -388,18 +388,22 @@ class Plugin(PluginInstance):
 
         api_key = self.api_key or os.environ.get('CALCULATE_ANYTHING_API_KEY') or ''
 
-        # Resolve language: configured value, then C.
-        lang = 'C'
-        for candidate in [self.language, 'C']:
-            try:
-                locale.setlocale(locale.LC_NUMERIC, candidate)
-                lang = candidate
-                break
-            except locale.Error:
-                continue
+        # preferences.language.set() expects the CLDR short form e.g. 'en_US'.
+        # Validate the user-configured value by checking whether calculate_anything
+        # has a translation file for it; fall back to the system locale otherwise.
+        def _lang_file_exists(lang: str) -> bool:
+            path = os.path.join(MAIN_DIR, 'data', 'lang', f'{lang}.json')
+            return os.path.isfile(path)
+
+        configured = self.language.split('.')[0] if self.language else ''  # strip encoding
+        system_lang = locale.getlocale()[0]
+        lang_cldr = system_lang
+
+        if configured and _lang_file_exists(configured):
+            lang_cldr = configured
 
         preferences = Preferences()
-        preferences.language.set(lang)
+        preferences.language.set(lang_cldr)
         preferences.currency.add_provider(self.currency_provider, api_key)
         preferences.currency.set_cache_update_frequency(self.cache)
         preferences.currency.set_default_currencies(self.default_currencies)
