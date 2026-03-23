@@ -61,6 +61,10 @@ class _BaseCalculateQueryHandler(RankedQueryHandler):
             self,
         )
         self.show_empty_placeholder = show_empty_placeholder
+        # Resolve once at construction — avoids re-instantiating ca-handlers
+        # on every keystroke from the background query thread.
+        self._query_prefix = self.query_prefix
+        self._ca_handlers  = self.ca_handlers
 
     @property
     @abstractmethod
@@ -90,10 +94,10 @@ class _BaseCalculateQueryHandler(RankedQueryHandler):
         return f'{md_description} [{self.mode}]'
 
     def rankItems(self, context):
-        query_str = self.query_prefix + context.query
+        query_str = self._query_prefix + context.query
 
         items = []
-        results = MultiHandler().handle(query_str, *self.ca_handlers)
+        results = MultiHandler().handle(query_str, *self._ca_handlers)
         for i, result in enumerate(results):
             icon_path = result.icon or images_dir('icon.svg')
             icon_path = os.path.join(MAIN_DIR, icon_path)
