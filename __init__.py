@@ -405,6 +405,10 @@ class Plugin(PluginInstance):
 
         if configured and _lang_file_exists(configured):
             lang_cldr = configured
+        else:
+            warning(f"Using {lang_cldr} instead of configured {configured} as language.")
+
+        info(f"Using {lang_cldr} as language.")
 
         preferences = Preferences()
         preferences.language.set(lang_cldr)
