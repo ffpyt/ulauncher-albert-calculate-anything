@@ -247,6 +247,7 @@ class Plugin(PluginInstance):
             if self.readConfig(setting, type(default)) is None:
                 self.writeConfig(setting, default)
 
+        self._apply_preferences()
         self._handlers = [
             _CalculatorHandler(self.show_empty_placeholder),
             _TimeHandler(self.show_empty_placeholder),
@@ -255,7 +256,6 @@ class Plugin(PluginInstance):
             _HexHandler(self.show_empty_placeholder),
             _OctHandler(self.show_empty_placeholder),
         ]
-        self._apply_preferences()
 
     # ------------------------------------------------------------------ config properties
 
@@ -406,9 +406,7 @@ class Plugin(PluginInstance):
         if configured and _lang_file_exists(configured):
             lang_cldr = configured
         else:
-            warning(f"Using {lang_cldr} instead of configured {configured} as language.")
-
-        info(f"Using {lang_cldr} as language.")
+            warning("Could not find translation file for language '{}'; falling back to system locale '{}'.".format(configured, system_lang))
 
         preferences = Preferences()
         preferences.language.set(lang_cldr)
@@ -418,6 +416,11 @@ class Plugin(PluginInstance):
         preferences.units.set_conversion_mode(self.units_conversion_mode)
         preferences.time.set_default_cities(self.default_cities)
         preferences.commit()
+
+        # parsedatetime has its own independent locale system — it must be
+        # told the locale explicitly. Neither locale.setlocale() nor
+        # LanguageService propagate into it.
+        TimeQueryHandler.LOCALE_ID = lang_cldr
 
     def extensions(self):
         return self._handlers
