@@ -72,7 +72,23 @@ class Base2Calculation(BaseNCalculation):
         return bin(int(self.value))[2:]
 
     def get_description(self) -> str:
-        return LanguageService().translate('bin', 'calculator').upper()
+        bits_set = []
+        value = self.value
+        bit = 0
+        while value > 0:
+            if value & 1:
+                bits_set.append(bit)
+            bit += 1
+            value >>= 1
+        if len(bits_set) == 1:
+            what_bits_are_set = f"Bit{bits_set[0]} is set"
+        elif len(bits_set) > 1:
+            what_bits_are_set = ", ".join([f"Bit{bit}" for bit in bits_set[:-1]])
+            what_bits_are_set += f" and Bit{bits_set[-1]} are set"
+        else:
+            what_bits_are_set = "No bits are set"
+
+        return LanguageService().translate('bin', 'calculator').upper() + " - " + what_bits_are_set
 
 
 class Base8Calculation(BaseNCalculation):
