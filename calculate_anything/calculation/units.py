@@ -71,44 +71,27 @@ class UnitsCalculation(Calculation):
         )
 
     def _format_babel(self) -> Tuple[str, str]:
-        # locale.getlocale() returns e.g. ('en_US', 'UTF-8').
-        # Babel/CLDR uses the short form 'en_US' for lookups, but pint
-        # passes that same short string to os setlocale() which requires
-        # the full 'en_US.UTF-8' form. Patch setlocale temporarily so
-        # pint's internal call is transparently upgraded.
-        _locale_parts = locale.getlocale()
-        _locale = _locale_parts[0]  # CLDR form, e.g. 'en_US'
-        _locale_os = '.'.join(filter(None, _locale_parts[:2]))  # e.g. 'en_US.UTF-8'
-        _orig_setlocale = locale.setlocale
+        _locale = locale.getlocale()[0]
 
-        def _patched_setlocale(category, loc=None):
-            if loc == _locale and _locale_os != _locale:
-                loc = _locale_os
-            return _orig_setlocale(category, loc)
+        if not UnitsCalculation.is_strictly_dimensionless(self.value):
+            name = self.value.format_babel(locale=_locale, spec='g')
+        else:
+            name = '{:g}'.format(self.value.magnitude)
 
-        locale.setlocale = _patched_setlocale
-        try:
-            if not UnitsCalculation.is_strictly_dimensionless(self.value):
-                name = self.value.format_babel(locale=_locale, spec='g')
-            else:
-                name = '{:g}'.format(self.value.magnitude)
+        if not self.unit_from.dimensionless:
+            unit_from_name = self.unit_from.format_babel(
+                locale=_locale, spec='g'
+            )
+        else:
+            unit_from_name = '{:g}'.format(self.unit_from)
 
-            if not self.unit_from.dimensionless:
-                unit_from_name = self.unit_from.format_babel(
-                    locale=_locale, spec='g'
-                )
-            else:
-                unit_from_name = '{:g}'.format(self.unit_from)
+        rate = self.rate.format_babel(locale=_locale, spec='g')
+        if self.unit_from != self.unit_to:
+            description = '1 {} = {}'.format(unit_from_name, rate)
+        else:
+            description = ''
 
-            rate = self.rate.format_babel(locale=_locale, spec='g')
-            if self.unit_from != self.unit_to:
-                description = '1 {} = {}'.format(unit_from_name, rate)
-            else:
-                description = ''
-
-            return name, description
-        finally:
-            locale.setlocale = _orig_setlocale
+        return name, description
 
     def format(self) -> Tuple[str, str]:
         use_translator = True
@@ -188,18 +171,8 @@ class TemperatureUnitsCalculation(UnitsCalculation):
     def format(self) -> Tuple[str, str]:
         parse_default = True
         if babel_units:
-            _locale_parts = locale.getlocale()
-            _locale = _locale_parts[0]  # CLDR form
-            _locale_os = '.'.join(filter(None, _locale_parts[:2]))
-            _orig_setlocale = locale.setlocale
-
-            def _patched_setlocale(category, loc=None):
-                if loc == _locale and _locale_os != _locale:
-                    loc = _locale_os
-                return _orig_setlocale(category, loc)
-
             try:
-                locale.setlocale = _patched_setlocale
+                _locale = locale.getlocale()[0]
                 unit_name = (
                     str(self.value.units)
                     .replace('degree_', 'temperature-', 1)
@@ -216,8 +189,6 @@ class TemperatureUnitsCalculation(UnitsCalculation):
                 msg = 'Babel: Could not translate temperature units "{}": {}'
                 msg = msg.format(self.value.units, e)
                 logger.exception(msg)
-            finally:
-                locale.setlocale = _orig_setlocale
 
         if parse_default:
             unit_name = str(self.value.units)
