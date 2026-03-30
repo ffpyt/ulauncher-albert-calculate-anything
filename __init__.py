@@ -1,8 +1,7 @@
 from abc import abstractmethod
 from albert import (
-    RankedQueryHandler,
+    GeneratorQueryHandler,
     PluginInstance,
-    RankItem,
     StandardItem,
     Action,
     Icon,
@@ -49,7 +48,7 @@ from calculate_anything.query.handlers import (
 from calculate_anything.utils import images_dir
 
 
-class _BaseCalculateQueryHandler(RankedQueryHandler):
+class _BaseCalculateQueryHandler(GeneratorQueryHandler):
     """
     Shared base for all Calculate Anything query handlers.
 
@@ -57,14 +56,14 @@ class _BaseCalculateQueryHandler(RankedQueryHandler):
     """
 
     def __init__(self, show_empty_placeholder: bool):
-        RankedQueryHandler.__init__(
-            self,
-        )
+        GeneratorQueryHandler.__init__(self)
         self.show_empty_placeholder = show_empty_placeholder
-        # Resolve once at construction — avoids re-instantiating ca-handlers
-        # on every keystroke from the background query thread.
-        self._query_prefix = self.query_prefix
-        self._ca_handlers  = self.ca_handlers
+        # Resolve once at construction on the main thread — avoids
+        # re-instantiating ca-handlers on every keystroke from the
+        # background query thread.
+        self._query_prefix  = self.query_prefix
+        self._ca_handlers   = self.ca_handlers
+        self._multi_handler = MultiHandler()
 
     @property
     @abstractmethod
@@ -93,12 +92,12 @@ class _BaseCalculateQueryHandler(RankedQueryHandler):
     def description(self) -> str:
         return f'{md_description} [{self.mode}]'
 
-    def rankItems(self, context):
+    def items(self, context):
         query_str = self._query_prefix + context.query
 
-        items = []
-        results = MultiHandler().handle(query_str, *self._ca_handlers)
-        for i, result in enumerate(results):
+        batch = []
+        results = self._multi_handler.handle(query_str, *self._ca_handlers)
+        for result in results:
             icon_path = result.icon or images_dir('icon.svg')
             icon_path = os.path.join(MAIN_DIR, icon_path)
 
@@ -112,40 +111,34 @@ class _BaseCalculateQueryHandler(RankedQueryHandler):
                     )
                 ]
 
-            items.append(
-                RankItem(
-                    StandardItem(
-                        id=md_name,
-                        icon_factory=lambda p=icon_path: Icon.image(p),
-                        text=result.name,
-                        subtext=result.description,
-                        actions=actions,
-                    ),
-                    i,
+            batch.append(
+                StandardItem(
+                    id=md_name,
+                    icon_factory=lambda p=icon_path: Icon.image(p),
+                    text=result.name,
+                    subtext=result.description,
+                    actions=actions,
                 )
             )
 
         should_show_placeholder = (
-            context.query.strip() == '' or len(items) == 0
+            context.query.strip() == '' or len(batch) == 0
         ) and self.show_empty_placeholder
 
         if should_show_placeholder:
             icon_path = os.path.join(MAIN_DIR, images_dir('icon.svg'))
-            items.append(
-                RankItem(
-                    StandardItem(
-                        id=md_name,
-                        icon_factory=lambda p=icon_path: Icon.image(p),
-                        text=LanguageService().translate('no-result', 'misc'),
-                        subtext=LanguageService().translate(
-                            'no-result-{}-description'.format(self.mode), 'misc'
-                        ),
+            batch.append(
+                StandardItem(
+                    id=md_name,
+                    icon_factory=lambda p=icon_path: Icon.image(p),
+                    text=LanguageService().translate('no-result', 'misc'),
+                    subtext=LanguageService().translate(
+                        'no-result-{}-description'.format(self.mode), 'misc'
                     ),
-                    len(items) - 1,
                 )
             )
 
-        return items
+        yield batch
 
 
 class _CalculatorHandler(_BaseCalculateQueryHandler):
@@ -155,7 +148,7 @@ class _CalculatorHandler(_BaseCalculateQueryHandler):
     def mode(self): return 'calculator'
 
     @property
-    def ca_handlers(self): return [UnitsQueryHandler, CalculatorQueryHandler, PercentagesQueryHandler]
+    def ca_handlers(self): return [UnitsQueryHandler(), CalculatorQueryHandler(), PercentagesQueryHandler()]
 
     @property
     def query_prefix(self): return CalculatorQueryHandler().keyword + ' '
@@ -168,7 +161,7 @@ class _TimeHandler(_BaseCalculateQueryHandler):
     def mode(self): return 'time'
 
     @property
-    def ca_handlers(self): return [TimeQueryHandler]
+    def ca_handlers(self): return [TimeQueryHandler()]
 
     @property
     def query_prefix(self): return TimeQueryHandler().keyword
@@ -181,7 +174,7 @@ class _DecHandler(_BaseCalculateQueryHandler):
     def mode(self): return 'dec'
 
     @property
-    def ca_handlers(self): return [Base10QueryHandler]
+    def ca_handlers(self): return [Base10QueryHandler()]
 
     @property
     def query_prefix(self): return Base10QueryHandler().keyword
@@ -194,7 +187,7 @@ class _BinHandler(_BaseCalculateQueryHandler):
     def mode(self): return 'bin'
 
     @property
-    def ca_handlers(self): return [Base2QueryHandler]
+    def ca_handlers(self): return [Base2QueryHandler()]
 
     @property
     def query_prefix(self): return Base2QueryHandler().keyword
@@ -207,7 +200,7 @@ class _HexHandler(_BaseCalculateQueryHandler):
     def mode(self): return 'hex'
 
     @property
-    def ca_handlers(self): return [Base16QueryHandler]
+    def ca_handlers(self): return [Base16QueryHandler()]
 
     @property
     def query_prefix(self): return Base16QueryHandler().keyword
@@ -220,7 +213,7 @@ class _OctHandler(_BaseCalculateQueryHandler):
     def mode(self): return 'oct'
 
     @property
-    def ca_handlers(self): return [Base8QueryHandler]
+    def ca_handlers(self): return [Base8QueryHandler()]
 
     @property
     def query_prefix(self): return Base8QueryHandler().keyword
