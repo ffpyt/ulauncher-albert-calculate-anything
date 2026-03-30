@@ -113,7 +113,7 @@ class _BaseCalculateQueryHandler(GeneratorQueryHandler):
 
             batch.append(
                 StandardItem(
-                    id=md_name,
+                    id=f"{self.id()}/{result.name}",
                     icon_factory=lambda p=icon_path: Icon.image(p),
                     text=result.name,
                     subtext=result.description,
@@ -129,8 +129,8 @@ class _BaseCalculateQueryHandler(GeneratorQueryHandler):
             icon_path = os.path.join(MAIN_DIR, images_dir('icon.svg'))
             batch.append(
                 StandardItem(
-                    id=md_name,
-                    icon_factory=lambda p=icon_path: Icon.image(p),
+                    id=f"{self.id()}/placeholder",
+                    icon_factory=lambda path=icon_path: Icon.image(path),
                     text=LanguageService().translate('no-result', 'misc'),
                     subtext=LanguageService().translate(
                         'no-result-{}-description'.format(self.mode), 'misc'
